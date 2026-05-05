@@ -1,0 +1,39 @@
+---
+title: "MB Habituation - Preprocessing"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(here)
+```
+
+## Load and filter
+
+Keep only habituation trials with valid looking times.
+
+```{r load}
+final_merged_manybabies <- read_csv(here("data","raw_data","final_merged_manybabies.csv"))
+
+d <- final_merged_manybabies |>
+  filter(habituation == TRUE) |>
+  filter(!is.na(looking_time), looking_time > 0) |>
+  mutate(
+    trial_num = as.numeric(trial_number),
+    log_lt    = log(looking_time),
+    subject   = factor(unique_subject_identifier),
+    project   = factor(project_id),
+    lab       = factor(lab_id)
+  ) |>
+  filter(!is.na(trial_num))
+
+d |> count(project_id, name = "n_trials")
+```
+
+## Save
+
+```{r}
+write_csv(d, here("data","processed_data","final_merged_manybabies_preprocessed.csv"))
+```
+
