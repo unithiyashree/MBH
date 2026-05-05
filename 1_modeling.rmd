@@ -39,34 +39,97 @@ d_proc <- d |>
          lt_habituated = lt_mov_avg < 0.5 * lt_baseline)
 ```
 
+## Moving average habituation criterion
+
 ```{r}
-d_proc |> 
-  ggplot(aes(x = trial_num, y = lt_mov_avg, col = project_id)) +
-  geom_line(aes(group = unique_subject_identifier), alpha = .1)
+d_habituated <- d_proc |> 
+  filter(lt_habituated) |> 
+  slice(1)
+
+d_habituated |> 
+  ggplot(aes(x = trial_num, fill = project_id)) +
+  geom_histogram(binwidth = 1)
 ```
 
+Very few kids in MB4 habituated, which is not very surprising (many of them maxed out the looking time).
+
+## MB4 DV exploration
+MB4 has two DVs: the LT on the video itself, and the LT on the freeze frame at the end of the video. 
+Furthermore, the videos differed across conditions, with the social condition video being 4.4s longer than the nonsocial condition video. 
+
+We explore the goodness of different DV choices (LT_video, LT_frame, LT_video_frame, LT_video_corr, LT_video_frame_corr), as well as LT_video with an additional fixed effect of trial_type.
+One option is to fit the power law fit and see which one has the best fit.
+
+```{r}
+mb4_formula_list <- list(
+  formula(log(looking_time + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
+  formula(log(lookingtime_freezeframe + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time + lookingtime_freezeframe + .01) ~ log(trial_num) + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time_corr + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time_corr + lookingtime_freezeframe + .01) ~ log(trial_num) + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time + .01) ~ log(trial_num) * trial_type + (1 + trial_num | lab_id / subject))
+)
+
+mb4_models <- tibble(
+  formula = mb4_formula_list,
+  model = map(formula, \(f) {
+    lmer(f, data = d_proc)
+  }),
+  BIC = map_dbl(model, BIC)
+)
+
+mb4_models |> select(-model)
+```
+
+Observations:
+- All models with freezeframe LT did not converge
+- The best fitting model was the model with raw LT and trial type
 
 ## Models
 ```{r}
 formula_list <- list(
-  formula(looking_time ~ trial_num * project_id + (1 + trial_num | lab_id / subject)),
-  formula(looking_time ~ poly(trial_num, 2) * project_id + (1 + trial_num | lab_id / subject)),
-  formula(looking_time ~ log(trial_num) * project_id + (1 + trial_num | lab_id / subject)),
-  formula(log(looking_time) ~ trial_num * project_id + (1 + trial_num | lab_id / subject)),
-  formula(log(looking_time) ~ poly(trial_num, 2) * project_id + (1 + trial_num | lab_id / subject)),
-  formula(log(looking_time) ~ log(trial_num) * project_id + (1 + trial_num | lab_id / subject))
+  formula(looking_time ~ trial_num * project_id + 
+            (1 + trial_num | lab_id / subject)),
+  formula(looking_time ~ poly(trial_num, 2) * project_id + 
+            (1 + trial_num | lab_id / subject)),
+  formula(looking_time ~ log(trial_num) * project_id + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ trial_num * project_id + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ poly(trial_num, 2) * project_id + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ log(trial_num) * project_id + 
+            (1 + trial_num | lab_id / subject)),
+  formula(looking_time ~ trial_num * project_id * trial_type + 
+            (1 + trial_num | lab_id / subject)),
+  formula(looking_time ~ poly(trial_num, 2) * project_id * trial_type + 
+            (1 + trial_num | lab_id / subject)),
+  formula(looking_time ~ log(trial_num) * project_id * trial_type + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ trial_num * project_id * trial_type + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ poly(trial_num, 2) * project_id * trial_type + 
+            (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ log(trial_num) * project_id * trial_type + 
+            (1 + trial_num | lab_id / subject))
 )
 ```
 
 ```{r}
 models <- tibble(
+  lt = rep(c("lt", "log_lt"), times = 2, each = 3),
+  fxn = rep(c("linear", "quadratic", "log"), times = 4),
+  cond = rep(c("no", "yes"), each = 6),
   formula = formula_list,
-  model = map(formula_list, \(f) {
+  model = map(formula, \(f) {
     lmer(f, data = d_proc)
   }),
-  BIC = map_dbl(model, BIC))
+  BIC = map_dbl(model, BIC)
+)
 
-models |> select(formula, BIC)
+models |> select(-formula, -model) |> arrange(BIC)
 ```
 
 ```{r}
@@ -74,12 +137,7 @@ d_preds <- d_proc |>
   mutate(pred = predict(models |> slice_min(BIC) |> pull(model)))
 ```
 
-Decision points
-- Figure out MB4 looking time situation (DV: LT_video, LT_frame, LT_video_plus_frame)
-- Figure out MB4 condition differences (do we correct for 4.4s extra in the social condition?)
-- Moving average comparison
-- Trial type interactions with trial_num 
-
+## Some plots
 
 ```{r}
 d_proc |> 
@@ -97,16 +155,6 @@ d_preds |>
 ```
 
 ```{r}
-lmer(
-  log(looking_time_corr) ~ log(trial_num) + 
-    (1 + trial_num | lab_id / subject),
-  data = d_proc
-) |> 
-  summary()
-```
-
-
-```{r}
 d_preds |> 
   filter(project_id == "MB4") |> 
   ggplot(aes(x = trial_num, y = lookingtime_freezeframe, col = trial_type)) +
@@ -114,7 +162,20 @@ d_preds |>
   geom_smooth(alpha = .1)
 ```
 
+## Quantifying each child's slope
+```{r}
+power_mod <- models |> 
+  filter(lt == "log_lt", fxn == "log", cond == "yes") |> 
+  pull(model) |> 
+  (\(x) x[[1]] )()
 
+slopes <- coef(power_mod)$`subject:lab_id` |> 
+  as_tibble(rownames = "subject")
+```
+
+
+
+# BAK
 
 ## Linear functional form: LT ~ trial_num
 
