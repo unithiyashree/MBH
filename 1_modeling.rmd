@@ -10,14 +10,111 @@ library(lme4)
 library(lmerTest)
 library(broom.mixed)
 library(here)
+library(zoo)
+
+theme_set(theme_bw() + 
+            theme(panel.grid = element_blank()))
 ```
 
 ## Load preprocessed data
 
 ```{r load}
 d <- read_csv(here("data","processed_data","final_merged_manybabies_preprocessed.csv"))
+  
 d |> count(project_id, name = "n_trials")
 ```
+
+```{r}
+d_proc <- d |> 
+  mutate(
+    project_id = project_id |> factor() |> `contrasts<-`(value = contr.sum(3) * 0.5),
+    looking_time_corr = ifelse(
+      project_id == "MB4" & trial_type == "social",
+      pmax(0.01, (looking_time - 4.4)),
+      looking_time
+    )) |> 
+  group_by(unique_subject_identifier) |> 
+  mutate(lt_mov_avg = rollmean(looking_time, 3, na.pad = T),
+         lt_baseline = lt_mov_avg[2],
+         lt_habituated = lt_mov_avg < 0.5 * lt_baseline)
+```
+
+```{r}
+d_proc |> 
+  ggplot(aes(x = trial_num, y = lt_mov_avg, col = project_id)) +
+  geom_line(aes(group = unique_subject_identifier), alpha = .1)
+```
+
+
+## Models
+```{r}
+formula_list <- list(
+  formula(looking_time ~ trial_num * project_id + (1 + trial_num | lab_id / subject)),
+  formula(looking_time ~ poly(trial_num, 2) * project_id + (1 + trial_num | lab_id / subject)),
+  formula(looking_time ~ log(trial_num) * project_id + (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ trial_num * project_id + (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ poly(trial_num, 2) * project_id + (1 + trial_num | lab_id / subject)),
+  formula(log(looking_time) ~ log(trial_num) * project_id + (1 + trial_num | lab_id / subject))
+)
+```
+
+```{r}
+models <- tibble(
+  formula = formula_list,
+  model = map(formula_list, \(f) {
+    lmer(f, data = d_proc)
+  }),
+  BIC = map_dbl(model, BIC))
+
+models |> select(formula, BIC)
+```
+
+```{r}
+d_preds <- d_proc |> 
+  mutate(pred = predict(models |> slice_min(BIC) |> pull(model)))
+```
+
+Decision points
+- Figure out MB4 looking time situation (DV: LT_video, LT_frame, LT_video_plus_frame)
+- Figure out MB4 condition differences (do we correct for 4.4s extra in the social condition?)
+- Moving average comparison
+- Trial type interactions with trial_num 
+
+
+```{r}
+d_proc |> 
+  filter(project_id == "MB4") |> 
+  ggplot(aes(x = looking_time_corr, fill = trial_type)) +
+  geom_histogram()  
+```
+
+```{r}
+d_preds |> 
+  filter(project_id == "MB4") |> 
+  ggplot(aes(x = looking_time, y = lookingtime_freezeframe, col = lab_id, shape = trial_type)) +
+  geom_hline(yintercept = 12) +
+  geom_point(alpha = .3)
+```
+
+```{r}
+lmer(
+  log(looking_time_corr) ~ log(trial_num) + 
+    (1 + trial_num | lab_id / subject),
+  data = d_proc
+) |> 
+  summary()
+```
+
+
+```{r}
+d_preds |> 
+  filter(project_id == "MB4") |> 
+  ggplot(aes(x = trial_num, y = lookingtime_freezeframe, col = trial_type)) +
+  geom_point(alpha = .2, position = position_jitter(width = .2)) +
+  geom_smooth(alpha = .1)
+```
+
+
 
 ## Linear functional form: LT ~ trial_num
 
@@ -25,7 +122,7 @@ d |> count(project_id, name = "n_trials")
 
 ```{r lin-raw}
 m_lin_raw <- lmer(
-  looking_time ~ trial_num + (1 + trial_num | subject) + (1 | project),
+  looking_time ~ trial_num * project_id + (1 + trial_num | lab_id / subject),
   data = d
 )
 summary(m_lin_raw)
@@ -104,6 +201,21 @@ d |>
   geom_smooth(aes(linetype = "Quadratic"), method = "lm",
               formula = y ~ poly(x, 2),    se = FALSE) +
   labs(x = "Trial number", y = "Mean looking time (s)",
+       title = "Habituation: linear vs. quadratic", linetype = "Form") +
+  theme_minimal()
+```
+
+```{r plot, fig.width=8, fig.height=5}
+d |>
+  group_by(project_id, trial_num) |>
+  summarise(mean_log_lt = mean(log_lt), .groups = "drop") |>
+  ggplot(aes(trial_num, mean_log_lt, colour = project_id)) +
+  geom_point() +
+  geom_smooth(aes(linetype = "Linear"),    method = "lm",
+              formula = y ~ x,             se = FALSE) +
+  geom_smooth(aes(linetype = "Quadratic"), method = "lm",
+              formula = y ~ poly(x, 2),    se = FALSE) +
+  labs(x = "Trial number", y = "Mean log looking time (s)",
        title = "Habituation: linear vs. quadratic", linetype = "Form") +
   theme_minimal()
 ```
