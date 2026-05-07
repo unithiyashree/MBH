@@ -39,6 +39,38 @@ d_proc <- d |>
          lt_habituated = lt_mov_avg < 0.5 * lt_baseline)
 ```
 
+## Visual check
+
+```{r plot, fig.width=8, fig.height=5}
+d |>
+  group_by(project_id, trial_num) |>
+  summarise(mean_lt = mean(looking_time), .groups = "drop") |>
+  ggplot(aes(trial_num, mean_lt, colour = project_id)) +
+  geom_point() +
+  geom_smooth(aes(linetype = "Linear"),    method = "lm",
+              formula = y ~ x,             se = FALSE) +
+  geom_smooth(aes(linetype = "Quadratic"), method = "lm",
+              formula = y ~ poly(x, 2),    se = FALSE) +
+  labs(x = "Trial number", y = "Mean looking time (s)",
+       title = "Habituation: linear vs. quadratic", linetype = "Form") +
+  theme_minimal()
+```
+
+```{r plot, fig.width=8, fig.height=5}
+d |>
+  group_by(project_id, trial_num) |>
+  summarise(mean_log_lt = mean(log_lt), .groups = "drop") |>
+  ggplot(aes(trial_num, mean_log_lt, colour = project_id)) +
+  geom_point() +
+  geom_smooth(aes(linetype = "Linear"),    method = "lm",
+              formula = y ~ x,             se = FALSE) +
+  geom_smooth(aes(linetype = "Quadratic"), method = "lm",
+              formula = y ~ poly(x, 2),    se = FALSE) +
+  labs(x = "Trial number", y = "Mean log looking time (s)",
+       title = "Habituation: linear vs. quadratic", linetype = "Form") +
+  theme_minimal()
+```
+
 ## Moving average habituation criterion
 
 ```{r}
@@ -134,7 +166,8 @@ models |> select(-formula, -model) |> arrange(BIC)
 
 ```{r}
 d_preds <- d_proc |> 
-  mutate(pred = predict(models |> slice_min(BIC) |> pull(model)))
+  ungroup() |> 
+  mutate(pred = predict(models$model[[12]]))
 ```
 
 ## Some plots
@@ -171,112 +204,20 @@ power_mod <- models |>
 
 slopes <- coef(power_mod)$`subject:lab_id` |> 
   as_tibble(rownames = "subject")
+
+slopes_cleaned <- slopes |> 
+  mutate(subject = str_remove(subject, ":.*")) |> 
+  select(subject, slope = trial_num)
 ```
 
+```{r}
+df_child <- d_proc |> 
+  select(project_id, lab_id, unique_subject_identifier, method, age_days, participant_sex, 
+         household_size, parent1_education, parent2_education, participant_place_of_birth,
+         race, primarycaregiver_gender, language_group, primary_language, primary_language_exposure,
+         caregiver_seat) |> 
+  distinct() |> 
+  left_join(slopes_cleaned, by = join_by(unique_subject_identifier == subject))
 
-
-# BAK
-
-## Linear functional form: LT ~ trial_num
-
-### Raw looking time
-
-```{r lin-raw}
-m_lin_raw <- lmer(
-  looking_time ~ trial_num * project_id + (1 + trial_num | lab_id / subject),
-  data = d
-)
-summary(m_lin_raw)
-```
-
-### Log looking time (canonical form)
-
-`log(LT) ~ trial_num` corresponds to exponential decay on the raw scale and is
-the standard "linear" habituation specification.
-
-```{r lin-log}
-m_lin_log <- lmer(
-  log_lt ~ trial_num + (1 + trial_num | subject) + (1 | project),
-  data = d
-)
-summary(m_lin_log)
-```
-
-## Quadratic functional form: LT ~ poly(trial_num, 2)
-
-Adds a squared term to capture curvature — e.g. faster decay early in the
-sequence that flattens out later. `poly(trial_num, 2)` uses orthogonal
-polynomials so the linear and quadratic terms are uncorrelated.
-
-### Raw looking time
-
-```{r quad-raw}
-m_quad_raw <- lmer(
-  looking_time ~ poly(trial_num, 2) + (1 + trial_num | subject) + (1 | project),
-  data = d
-)
-summary(m_quad_raw)
-```
-
-### Log looking time
-
-```{r quad-log}
-m_quad_log <- lmer(
-  log_lt ~ poly(trial_num, 2) + (1 + trial_num | subject) + (1 | project),
-  data = d
-)
-summary(m_quad_log)
-```
-
-## Fixed-effect estimates (all models)
-
-```{r tidy}
-bind_rows(
-  tidy(m_lin_raw,  effects = "fixed") |> mutate(model = "LT ~ trial_num"),
-  tidy(m_lin_log,  effects = "fixed") |> mutate(model = "log(LT) ~ trial_num"),
-  tidy(m_quad_raw, effects = "fixed") |> mutate(model = "LT ~ poly(trial_num, 2)"),
-  tidy(m_quad_log, effects = "fixed") |> mutate(model = "log(LT) ~ poly(trial_num, 2)")
-) |>
-  select(model, term, estimate, std.error, statistic, p.value)
-```
-
-## Model comparison
-
-```{r compare}
-AIC(m_lin_raw, m_quad_raw)
-AIC(m_lin_log, m_quad_log)
-anova(m_lin_raw, m_quad_raw)
-anova(m_lin_log, m_quad_log)
-```
-
-## Visual check
-
-```{r plot, fig.width=8, fig.height=5}
-d |>
-  group_by(project_id, trial_num) |>
-  summarise(mean_lt = mean(looking_time), .groups = "drop") |>
-  ggplot(aes(trial_num, mean_lt, colour = project_id)) +
-  geom_point() +
-  geom_smooth(aes(linetype = "Linear"),    method = "lm",
-              formula = y ~ x,             se = FALSE) +
-  geom_smooth(aes(linetype = "Quadratic"), method = "lm",
-              formula = y ~ poly(x, 2),    se = FALSE) +
-  labs(x = "Trial number", y = "Mean looking time (s)",
-       title = "Habituation: linear vs. quadratic", linetype = "Form") +
-  theme_minimal()
-```
-
-```{r plot, fig.width=8, fig.height=5}
-d |>
-  group_by(project_id, trial_num) |>
-  summarise(mean_log_lt = mean(log_lt), .groups = "drop") |>
-  ggplot(aes(trial_num, mean_log_lt, colour = project_id)) +
-  geom_point() +
-  geom_smooth(aes(linetype = "Linear"),    method = "lm",
-              formula = y ~ x,             se = FALSE) +
-  geom_smooth(aes(linetype = "Quadratic"), method = "lm",
-              formula = y ~ poly(x, 2),    se = FALSE) +
-  labs(x = "Trial number", y = "Mean log looking time (s)",
-       title = "Habituation: linear vs. quadratic", linetype = "Form") +
-  theme_minimal()
+write_csv(df_child, here("data", "processed_data", "child_demogs_slopes.csv"))
 ```

@@ -1,0 +1,59 @@
+---
+title: "MB Habituation - Predictors"
+format: html
+editor: source
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(broom.mixed)
+library(here)
+library(zoo)
+
+theme_set(theme_bw() + 
+            theme(panel.grid = element_blank()))
+```
+
+```{r}
+df_child <- read_csv(here("data", "processed_data", "child_demogs_slopes.csv"))
+```
+
+# Predicting slopes
+```{r}
+df_child |> 
+  ggplot(aes(x = age_days, y = slope, col = project_id)) +
+  geom_point(alpha = .5)
+```
+
+```{r}
+df_child |> 
+  ggplot(aes(x = participant_sex, y = slope, col = project_id)) +
+  geom_point(alpha = .5, position = position_jitter(width = .2))
+```
+
+```{r}
+df_child |> 
+  ggplot(aes(x = household_size, y = slope, col = project_id)) +
+  geom_point(alpha = .5, position = position_jitter(width = .2))
+```
+
+```{r}
+df_child |> 
+  ggplot(aes(x = language_group, y = slope, col = project_id)) +
+  geom_point(alpha = .5, position = position_jitter(width = .2))
+```
+
+```{r}
+df_child |> 
+  ggplot(aes(x = caregiver_seat, y = slope, col = project_id)) +
+  geom_point(alpha = .2, position = position_jitter(width = .2))
+```
+
+```{r}
+df_child |> 
+  ggplot(aes(x = method, y = slope, col = project_id)) +
+  geom_point(alpha = .2, position = position_jitter(width = .2))
+```
