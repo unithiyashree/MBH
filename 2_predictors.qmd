@@ -25,7 +25,8 @@ df_child <- read_csv(here("data", "processed_data", "child_demogs_slopes.csv"))
 ```{r}
 df_child |> 
   ggplot(aes(x = age_days, y = slope, col = project_id)) +
-  geom_point(alpha = .5)
+  geom_point(alpha = .5) +
+  geom_smooth(method = "lm")
 ```
 
 ```{r}

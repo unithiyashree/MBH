@@ -92,7 +92,7 @@ Furthermore, the videos differed across conditions, with the social condition vi
 We explore the goodness of different DV choices (LT_video, LT_frame, LT_video_frame, LT_video_corr, LT_video_frame_corr), as well as LT_video with an additional fixed effect of trial_type.
 One option is to fit the power law fit and see which one has the best fit.
 
-```{r}
+```{r eval=F}
 mb4_formula_list <- list(
   formula(log(looking_time + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
   formula(log(lookingtime_freezeframe + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
@@ -145,15 +145,36 @@ formula_list <- list(
   formula(log(looking_time) ~ poly(trial_num, 2) * project_id * trial_type + 
             (1 + trial_num | lab_id / subject)),
   formula(log(looking_time) ~ log(trial_num) * project_id * trial_type + 
-            (1 + trial_num | lab_id / subject))
+            (1 + trial_num | lab_id / subject)),
+  
+  formula(looking_time ~ poly(trial_num, 2) * project_id + 
+            (1 + poly(trial_num, 2) | lab_id / subject)),
+  formula(looking_time ~ log(trial_num) * project_id + 
+            (1 + log(trial_num) | lab_id / subject)),
+  formula(log(looking_time) ~ poly(trial_num, 2) * project_id + 
+            (1 + poly(trial_num, 2) | lab_id / subject)),
+  formula(log(looking_time) ~ log(trial_num) * project_id + 
+            (1 + log(trial_num) | lab_id / subject)),
+  formula(looking_time ~ poly(trial_num, 2) * project_id * trial_type + 
+            (1 + poly(trial_num, 2) | lab_id / subject)),
+  formula(looking_time ~ log(trial_num) * project_id * trial_type + 
+            (1 + log(trial_num) | lab_id / subject)),
+  formula(log(looking_time) ~ poly(trial_num, 2) * project_id * trial_type + 
+            (1 + poly(trial_num, 2) | lab_id / subject)),
+  formula(log(looking_time) ~ log(trial_num) * project_id * trial_type + 
+            (1 + log(trial_num) | lab_id / subject))
 )
 ```
 
-```{r}
+```{r eval=F}
 models <- tibble(
-  lt = rep(c("lt", "log_lt"), times = 2, each = 3),
-  fxn = rep(c("linear", "quadratic", "log"), times = 4),
-  cond = rep(c("no", "yes"), each = 6),
+  lt = c(rep(c("lt", "log_lt"), times = 2, each = 3), 
+         rep(c("lt", "log_lt"), times = 2, each = 2)),
+  fxn = c(rep(c("linear", "quadratic", "log"), times = 4),
+          rep(c("quadratic", "log"), times = 4)),
+  cond = c(rep(c("no", "yes"), each = 6),
+           rep(c("no", "yes"), each = 4)),
+  full_re = c(rep("no", each = 12), rep("yes", each = 8)),
   formula = formula_list,
   model = map(formula, \(f) {
     lmer(f, data = d_proc)
@@ -161,7 +182,118 @@ models <- tibble(
   BIC = map_dbl(model, BIC)
 )
 
+saveRDS(models, here("models", "fit_models.rds"))
+```
+
+```{r}
+models <- readRDS(here("models", "fit_models.rds"))
+
 models |> select(-formula, -model) |> arrange(BIC)
+```
+
+# Expanding window CV
+```{r eval=F}
+models_cv <- models |> 
+  filter(cond == "yes",
+         # fxn == "linear", # for testing
+         lt == "log_lt") |> 
+  select(-model, -BIC) |> 
+  cross_join(tibble(last_trial = 4:15)) |> 
+  mutate(model = map2(formula, last_trial, \(f, l) {
+    lmer(f, data = d_proc |> filter(trial_num <= l))
+  }),
+  BIC = map_dbl(model, BIC)
+  )
+
+models_cv_preds <- models_cv |> 
+  mutate(d_filtered = map(last_trial, \(l) {
+    d_proc |> 
+      filter(trial_num == (l + 1),
+             subject %in% (d_proc |> 
+                             filter(trial_num <= l) |> 
+                             pull(subject) |> 
+                             unique())) |> 
+      ungroup()
+  }),
+  preds = map2(model, d_filtered, \(m, d) {
+    d |> 
+      mutate(pred = predict(m, d))
+  }), rmse = map_dbl(preds, \(p) {
+    p |> summarise(rmse = sqrt(sum((pred - log_lt) ^ 2) / n())) |> 
+      pull(rmse)
+  }))
+
+saveRDS(models_cv_preds, here("models", "fit_cv_preds.rds"))
+```
+
+```{r eval=F}
+models_cv_ci <- models_cv_preds |> 
+  mutate(rmse = map(preds, \(p) {
+    p_sq <- p |> mutate(sqerr = (pred - log_lt) ^ 2)
+    boot::boot(p_sq, \(d, i) {
+      d[i,] |> pull(sqerr) |> mean() |> sqrt()
+    }, 1000)
+  })) |> 
+  select(lt, fxn, cond, full_re, last_trial, rmse, preds)
+
+models_cv_ci <- models_cv_ci |> 
+  mutate(ci = map(rmse, boot::boot.ci),
+         mean = map_dbl(preds, \(p) {
+           p |> summarise(rmse = sqrt(sum((pred - log_lt) ^ 2) / n())) |> 
+             pull(rmse)
+         }))
+
+saveRDS(models_cv_ci, here("models", "fit_cv_ci.rds"))
+```
+
+
+```{r}
+models_cv_preds <- readRDS(here("models", "fit_cv_preds.rds"))
+models_cv_ci <- readRDS(here("models", "fit_cv_ci.rds"))
+
+models_cv_ci_simp <- models_cv_ci |> 
+  mutate(ci = map(ci, \(c) {
+    c$normal |> as.tibble() |> `colnames<-`(c("ci_size", "ci.lb", "ci.ub"))
+  }) |> list_rbind()) |> 
+  unnest(ci) |> 
+  select(-rmse, -preds)
+```
+
+```{r}
+models_cv_preds |> 
+  select(-preds) |> 
+  ggplot(aes(x = last_trial, y = rmse, col = interaction(lt, fxn, cond, full_re))) +
+  geom_errorbar(aes(ymin = ci.lb, ymax = ci.ub, y = mean),
+                data = models_cv_ci_simp, width = 0,
+                position = position_dodge(.4)) +
+  geom_point(position = position_dodge(.4)) +
+  geom_line(aes(group = interaction(lt, fxn, cond, full_re)), position = position_dodge(.4)) +
+  labs(x = "Last trial observed", y = "Prediction RMSE on next trial")
+```
+
+```{r}
+models_cv_preds |> 
+  select(-preds) |> 
+  group_by(last_trial) |> 
+  mutate(rmse_diff = rmse - min(rmse)) |> 
+  ggplot(aes(x = last_trial, y = rmse_diff, col = interaction(lt, fxn, cond, full_re))) +
+  # geom_errorbar(aes(ymin = ci.lb, ymax = ci.ub, y = mean),
+  #               data = models_cv_ci_simp, width = 0,
+  #               position = position_dodge(.4)) +
+  geom_point(position = position_dodge(.4)) +
+  geom_line(aes(group = interaction(lt, fxn, cond, full_re)), position = position_dodge(.4)) +
+  labs(x = "Last trial observed", y = "ΔNext-trial prediction RMSE from best")
+```
+
+```{r}
+models_cv_preds |> 
+  select(-preds) |> 
+  group_by(last_trial) |> 
+  mutate(bic_diff = BIC - min(BIC)) |> 
+  ggplot(aes(x = last_trial, y = bic_diff, col = interaction(lt, fxn, cond, full_re))) +
+  geom_point(position = position_dodge(.4)) +
+  geom_line(aes(group = interaction(lt, fxn, cond, full_re)), position = position_dodge(.4)) +
+  labs(x = "Last trial observed", y = "ΔBIC from best")
 ```
 
 ```{r}
@@ -195,19 +327,33 @@ d_preds |>
   geom_smooth(alpha = .1)
 ```
 
+```{r}
+d_proc |> 
+  filter(project_id == "MB1",
+         !is.na(participant_sex)) |> 
+  ggplot(aes(x = trial_num, y = looking_time, 
+             col = cut(age_days, 
+                       breaks = quantile(age_days, probs = seq(0, 1, 0.25)), 
+                       include.lowest = TRUE))) +
+  geom_point(alpha = .2, position = position_jitter(width = .2)) +
+  geom_smooth(alpha = .3) +
+  theme(legend.position = "bottom") +
+  labs(col = "Covariate")
+```
+
 ## Quantifying each child's slope
 ```{r}
 power_mod <- models |> 
-  filter(lt == "log_lt", fxn == "log", cond == "yes") |> 
+  filter(lt == "log_lt", fxn == "log", cond == "yes", full_re == "yes") |> 
   pull(model) |> 
-  (\(x) x[[1]] )()
+  (\(x) x[[1]])()
 
 slopes <- coef(power_mod)$`subject:lab_id` |> 
   as_tibble(rownames = "subject")
 
 slopes_cleaned <- slopes |> 
   mutate(subject = str_remove(subject, ":.*")) |> 
-  select(subject, slope = trial_num)
+  select(subject, slope = `log(trial_num)`)
 ```
 
 ```{r}
@@ -221,3 +367,17 @@ df_child <- d_proc |>
 
 write_csv(df_child, here("data", "processed_data", "child_demogs_slopes.csv"))
 ```
+
+```{r}
+coef(power_mod)$`subject:lab_id` |> 
+  as_tibble(rownames = "subject") |> 
+  mutate(study = str_sub(subject, 1, 3)) |> 
+  separate_wider_delim(subject, delim = ":", names = c("subject_id", "lab_id")) |> 
+  left_join(d_proc |> select(unique_subject_identifier, age_days),
+            by = join_by(subject_id == unique_subject_identifier)) |> 
+  ggplot(aes(x = age_days, y = `(Intercept)`, col = study)) +
+  geom_point(alpha = .01) +
+  geom_hline(yintercept = 2, lty = "dashed") +
+  geom_smooth(method = "lm")
+```
+
