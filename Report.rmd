@@ -1,0 +1,41 @@
+---
+title: "MB Habituation - Report"
+output: html_document
+---
+
+## Functional Form of Habituation
+
+**Question**. Across the pooled ManyBabies (MB1, MB3, MB4) habituation trials, 
+what functional form best describes the looking time (LT)?
+
+### What we compared
+
+Habituation is a process in which the looking time of infants drops as the same 
+stimulus is repeated. We are examining three forms for the effect of `trial_num`:
+
+- **Linear** — a constant decrease per trial. 
+- **Quadratic** (`poly(trial_num, 2)`) — allows curvature, so the slope can
+  decelerate (or accelerate) across trials. 
+- **Log** (`log(trial_num)`) — a sharp early drop that flattens into a long
+  tail. When paired with `log(LT)` on the outcome side this is the
+  **power law** `LT = a · trial_num^b`, which is the canonical habituation
+  curve in the developmental literature (Bashinski, Werner & Rudy 1985;
+  ManyBabies 1).
+
+Each form was crossed with two outcome scales (raw LT and log LT) and with /
+without a `trial_type` interaction, giving 12 mixed-effects models in total.
+Every model included random intercepts and random slopes of `trial_num`
+nested within `lab_id / subject`, and a fixed interaction with `project_id`
+to absorb project-level baseline differences. The fits are produced in
+[1_modeling.rmd](1_modeling.rmd).
+
+### How we chose between them
+
+We ranked models by **BIC**. 
+
+### Result
+
+The log form — specifically, `log(looking_time) ~ log(trial_num) * project_id * trial_type`
+— had the **lowest BIC of all twelve candidates**. Quadratic models came in second within each DV/condition
+block but were consistently dominated by the log form. The linear form was the
+worst among all.
