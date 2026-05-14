@@ -31,7 +31,12 @@ to absorb project-level baseline differences. The fits are produced in
 
 ### How we chose between them
 
-We ranked models by **BIC**. 
+We ranked models by **BIC** (Bayesian Information Criterion). BIC scores a
+fitted model on two things at once: how well it fits the data (via the
+log-likelihood) and how many parameters it spends doing so. Lower is better,
+and differences greater than 10 are conventionally treated as decisive
+evidence for the lower-BIC model.
+
 
 ### Result
 
@@ -39,3 +44,62 @@ The log form — specifically, `log(looking_time) ~ log(trial_num) * project_id 
 — had the **lowest BIC of all twelve candidates**. Quadratic models came in second within each DV/condition
 block but were consistently dominated by the log form. The linear form was the
 worst among all.
+
+
+## Age: Slope vs. Intercept Effects
+
+**Question.** When we add `age_days` as a predictor in the habituation model,
+does age move the **intercept** of the curve (how much babies look on trial 1),
+the **slope** (how fast they habituate across trials), or both?
+
+The current results show an **intercept effect of age** (older babies start
+with somewhat different baseline looking times) and a **small, near-zero
+slope effect** (the rate at which LT decays across trials barely changes with
+age). In other words, age shifts the curve up or down more than it changes
+its steepness. 
+
+**Why this is a meaningful distinction.** In a model like
+`log(LT) ~ log(trial_num) * age`, the main effect of age is the *intercept*
+effect — a vertical shift of the whole habituation curve. The `log(trial_num)
+× age` interaction is the *slope* effect — whether older babies habituate
+faster (steeper drop) or slower than younger ones. These two coefficients
+answer different developmental questions, and they can move independently.
+
+**Pros and cons of treating the effect as intercept-only.**
+
+*Pros.*
+
+- **Parsimony.** Dropping the age × trial interaction removes a parameter
+  the data don't seem to need, which lowers BIC and helps the random-effect
+  structure converge cleanly.
+- **Cleaner interpretation.** A intercept effect can easily be interpreted as 
+  when age changes *how much* babies look, not *how* they habituate. 
+- **Stable across projects.** An intercept-only age effect is less sensitive
+  to the differences in trial counts and stimulus durations across MB1, MB3,
+  and MB4 than a slope effect would be, since slope estimates could be noisier
+  for children with fewer trials.
+
+*Cons.*
+
+- **It contradicts the developmental prediction.** The habituation
+  literature predicts a **slope effect**: older babies should habituate
+  *faster* (steeper decay) because they encode and recognise the repeated
+  stimulus more efficiently. Finding only an intercept effect is
+  theoretically surprising and needs further investigation.
+- **The slope effect may be there but underpowered.** Per-child slopes are
+  estimated from at most ~14 trials each, and they're shrunk toward the
+  group mean by the random-effect structure, which compresses between-child
+  slope variance. If the true slope effect is small, it may be swamped by noise 
+  and shrinkage.
+- **Age range is narrow within each project.** MB1, MB3, and MB4 each
+  recruit a fairly tight age band, so most of the age variance is *between*
+  projects rather than within. With `project_id` already absorbing
+  cross-project baseline differences, there isn't much within-project age
+  spread left to drive a slope effect.
+
+**Takeaway.** What we see in the data (intercept effect, slope ≈ 0) does not
+match what habituation theory predicts (slope effect). Before concluding
+that age genuinely doesn't change habituation rate, the small slope effect
+should be further investigated.
+
+
