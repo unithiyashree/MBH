@@ -1,0 +1,300 @@
+---
+title: "MBH Brief Report"
+format: pdf
+---
+
+```{r include=F}
+knitr::opts_chunk$set(echo = F, warning = F, message = F)
+
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(here)
+library(glue)
+library(performance)
+library(broom.mixed)
+
+theme_set(theme_bw() + 
+            theme(panel.grid = element_blank()))
+
+print_num <- \(num, sf = 3, noz = F) {
+  pnum <- num |> round(sf) |> format(nsmall = sf)
+  if (noz) pnum <- pnum |> str_replace("0.", ".")
+  pnum
+}
+
+report_b <- \(mod, bterm, sf = 3) {
+  d_term <- mod |> tidy() |> filter(term == bterm)
+  b <- d_term |> pull(estimate) |> print_num(sf = sf)
+  ci.lb <- d_term |> mutate(ci.lb = estimate - qnorm(.975) * std.error) |> 
+    pull(ci.lb) |> print_num(sf = sf)
+  ci.ub <- d_term |> mutate(ci.ub = estimate + qnorm(.975) * std.error) |> 
+    pull(ci.ub) |> print_num(sf = sf)
+  p <- d_term |> pull(p.value) |> print_num(sf = 3, noz = T)
+  glue("$b$ = {b} [{ci.lb}, {ci.ub}], $p$ = {p}")
+}
+```
+
+In this brief report, we describe our analyses for the Exploratory ManyBabies Habituation Project, aiming to investigate three research questions (RQs):
+
+- RQ1. What is the functional form of the habituation in infant looking time (LT) data?
+- RQ2. Are there individual differences in infant habituation?
+- RQ3. Do methodological and measurement choices influence the estimation and interpretation of infant habituation?
+
+We use the pooled MB1, MB3, and MB4 data for all analyses.
+
+## Functional form of habituation
+
+For RQ1, we investigated how LT was related to the trial number.
+The main theoretical functional form of interest was the *power law*, where the relationship between LT and trial number can be expressed as `LT = a * trial_num^b`.
+This formulation derives from the idea of the power law of practice (Snoddy, 1928, *J Appl Psychol*), and has qualitative support from earlier investigations of habituation (Bornstein & Benasich, 1986, *Child Dev*).
+It also approximates the habituation curve derived from a more complex formal model of LT (Raz et al., 2025, *eLife*).
+Under the power law, log LT would show a linear relationship with log trial number.
+
+We investigated whether we could recover the power law via model selection. 
+We varied the following parameters:
+
+- Outcome transformation: raw LT or log-transformed LT
+- Interaction with trial type: present or absent
+- Functional form: linear, quadratic, or log
+- Random slopes (for quadratic and log functional forms): linear or matched to fixed effect function
+
+The full model also included an interaction effect with project ID, since we expected the stimulus and methodology differences across the three MB projects to contribute significant variance in LT.
+Project ID was coded with sum contrasts.
+Random intercepts and slopes were specified as random effects of participant ID nested within lab ID.
+
+We conducted model selection in two ways.
+First, we calculated the Bayesian Information Criterion (BIC) of the model, which estimates its goodness of fit (via log likelihood) in relation to the number of parameters in the model.
+This approach reflected the extent to which the model was the best fit to all the data.
+Smaller BIC values indicate better fitting models, with a ΔBIC $\geq$ 10 considered a notable difference (Rafferty, 1995, *Sociol Methodol*).
+Second, we conducted an expanding window cross-validation, where we fit the model to trials 1 through $k$, then predicted the LT for trial $k+1$.
+We then calculated the root mean squared error (RMSE) of the predicted versus observed values.
+This approach focused on the extent to which the model could predict future trials, under the observation that models should not be overfit to a specific number of trials, which is typically a methodological constraint.
+
+```{r}
+#| label: fig-fxn-bic
+#| fig-cap: "BIC values for all models tested, faceted by outcome transformation. Note that the x-axis values differ across the two facets. RS: random slopes."
+
+models <- readRDS(here("models", "fit_models.rds"))
+
+models |> 
+  mutate(form = map2_chr(fxn, full_re, \(f, r) {
+    case_when(
+      f == "linear" ~ "Linear",
+      r == "yes" ~ str_c(str_to_title(f), " + matched RS"),
+      r == "no" ~ str_c(str_to_title(f), " + linear RS"),
+    )
+  }) |> fct_reorder(BIC),
+  lt = recode_values(
+    lt,
+    "log_lt" ~ "Log LT",
+    "lt" ~ "Raw LT"
+  )) |> 
+  ggplot(aes(x = BIC, y = form, col = cond)) +
+  geom_point() +
+  facet_grid(~ lt, scales = "free_x") +
+  labs(x = "BIC", y = "Functional form", col = "Trial type interaction") +
+  theme(legend.position = "bottom")
+```
+
+@fig-fxn-bic shows the BIC values for all models. 
+Models with log LT as the outcome were uniformly better than models with raw LT as the outcome.
+Furthermore, models with trial type interaction were also better than equivalent models without the interaction.
+Turning to functional form, the best model was in fact the quadratic form, instead of the log form.
+
+```{r}
+#| label: fig-fxn-rmse
+#| fig-cap: "RMSE values for models with log LT and trial type interaction, plotted by the last trial observed in the model. Note that the x-axis begins at 4 (the minimum number of trials needed to support the number of parameters in quadratic models), and ends at 15 (one less than the maximum number of trials in the data). Error bars indicate bootstrapped 95% confidence intervals. RS: random slopes."
+
+models_cv_preds <- readRDS(here("models", "fit_cv_preds.rds"))
+models_cv_ci <- readRDS(here("models", "fit_cv_ci.rds"))
+
+models_cv_ci_simp <- models_cv_ci |> 
+  mutate(ci = map(ci, \(c) {
+    c$normal |> as.tibble() |> `colnames<-`(c("ci_size", "ci.lb", "ci.ub"))
+  }) |> list_rbind()) |> 
+  unnest(ci) |> 
+  select(-rmse, -preds) |> 
+  mutate(form = map2_chr(fxn, full_re, \(f, r) {
+    case_when(
+      f == "linear" ~ "Linear",
+      r == "yes" ~ str_c(str_to_title(f), " + matched RS"),
+      r == "no" ~ str_c(str_to_title(f), " + linear RS"),
+    )
+  }) |> fct_reorder(mean))
+
+models_cv_preds |> 
+  select(-preds) |> 
+  mutate(form = map2_chr(fxn, full_re, \(f, r) {
+    case_when(
+      f == "linear" ~ "Linear",
+      r == "yes" ~ str_c(str_to_title(f), " + matched RS"),
+      r == "no" ~ str_c(str_to_title(f), " + linear RS"),
+    )
+  }) |> fct_reorder(rmse)) |> 
+  ggplot(aes(x = last_trial, y = rmse, col = form)) +
+  geom_errorbar(aes(ymin = ci.lb, ymax = ci.ub, y = mean),
+                data = models_cv_ci_simp, width = 0,
+                position = position_dodge(.4)) +
+  geom_point(position = position_dodge(.4)) +
+  geom_line(aes(group = interaction(lt, fxn, cond, full_re)), position = position_dodge(.4)) +
+  labs(x = "Last trial observed", y = "Prediction RMSE on next trial", col = "Functional form")
+```
+
+We next turned to the expanding window cross-validation.
+For computational reasons, we selected only models with log LT as the outcome and including the trial type interaction, since these features uniformly improved model fit.
+@fig-fxn-rmse shows the prediction RMSE for tested models by the last trial observed in the training data.
+RMSE increased over trials, possibly due to a combination of increasing noisiness of the data, as well as increasing dropoff (noting, for example, that MB3 and MB4 both had fewer than 16 trials).
+The 95% confidence intervals were overlapping for all models at all trial numbers, suggesting that they were not different in their predictive accuracy.
+
+Thus, we were unable to recover the power law model via model selection using either BIC or prediction RMSE.
+This outcome was unexpected and may have several explanations.
+First, none of MB1, MB3, or MB4 were designed to study habituation, and thus their stimuli were also not tuned to primarily elicit a habituation effect.
+Notably, all stimuli were dynamic, and could possibly come from different categories (in MB1 and MB3), or were played exactly once each trial with a maximum LT matching the duration of the video (in MB4).
+These features may have introduced unwanted noise in the data, resulting in non-standard habituation curves.
+Second, we note that the resultant predictions between the quadratic and log forms were very similar; it is possible that the random slopes provided sufficient flexibility such that good fits were obtainable using either functional form, rendering them indistinguishable.
+
+Regardless, we did not consider quadratic to be a plausible functional form because it implies an inflection point beyond which LT actually increases over trials.
+Similarly, linear forms could be extrapolated to result in negative LT in future trials. 
+Thus, for theoretical reasons, we selected the log functional form with matched random slopes for subsequent RQs, accepting that we were not able to empirically demonstrate its superiority over other forms.
+The formula for our selected model was: `log(LT) ~ log(trial_num) * project_id * trial_type + (1 + log(trial_num) | lab_id / participant_id))`.
+
+## Additional model validation
+
+```{r}
+#| label: fig-sanity-intercept
+#| fig-cap: "LT intercepts for all participants by age in months. Lines and shaded bands indicate best-fitting linear regressions and their 95% confidence bands."
+
+df_child <- read_csv(here("data", "processed_data", "child_demogs_slopes.csv"),
+                     show_col_types = FALSE) |> 
+  mutate(age_mo = age_days / (365.2425 / 12),
+         project_id = factor(project_id) |> `contrasts<-`(value = contr.sum(3)))
+
+mod_int <- lm(intercept ~ age_mo * project_id,
+              data = df_child)
+
+df_child |> 
+  ggplot(aes(x = age_mo, y = intercept, col = project_id)) +
+  geom_point(alpha = .2) +
+  geom_smooth(method = "lm") +
+  labs(x = "Age (months)", y = "LT intercept", col = "Project")
+```
+
+To understand the validity of our selected model, we conducted two sanity checks to determine if our selected model returned reasonable estimates.
+First, we looked at the effect of age on per-participant *intercepts*; we expected younger children to have higher random intercepts---their slower information processing means that they are likely to have overall higher LT across all stimuli and trials.
+@fig-sanity-intercept shows the effect of age on LT intercept. 
+A linear model predicting intercept from age in months did not find a significant effect of age, although it was numerically in the expected direction (`r report_b(mod_int, "age_mo")`).
+
+```{r}
+#| label: fig-sanity-habit
+#| fig-cap: "LT slopes for all participants by trial at which habituation criterion is reached. Lines indicate best-fitting linear regressions; confidence bands were excluded due to visual clutter."
+
+cor_habit <- with(df_child, cor.test(slope, hab_trial, use = "pairwise.complete.obs"))
+
+cr <- cor_habit$estimate |> print_num(noz = T)
+cr_ci <- cor_habit$conf.int |> print_num(noz = T)
+cr_p <- cor_habit$p.value |> print_num(noz = T)
+cr_str <- glue("$r$ = {cr} [{cr_ci[1]}, {cr_ci[2]}], $p$ < .001")
+
+df_child |> 
+  ggplot(aes(x = hab_trial, y = slope, col = project_id)) +
+  geom_point(alpha = .2, position = position_jitter(width = .4)) +
+  geom_smooth(method = "lm", se = F) +
+  labs(x = "Trial when moving average habituation criterion reached",
+       y = "Participant LT slope",
+       col = "Project")
+```
+
+Second, we considered the relationship between per-participant *slopes* and a common quantised habituation criterion.
+Specifically, we use the criterion of $\geq$50% decrease in average LT from the baseline (first 3 trials), using a rolling window of 3 trials (see Cohen, 2004, *Infant Child Dev*; Oakes, 2010, *J Cogn Dev*).
+If the per-participant slopes from our model capture meaningful individual differences in habituation, they should be correlated with the trial at which the habituation criterion is reached.
+@fig-sanity-habit shows the relationship between per-participant slopes and the trial at which habituation criterion is reached; we note that very few infants in MB4 actually reached habituation criterion (because many of the retained very high LTs even in later trials), so the clearest signal comes from MB1 and MB3.
+Overall, there was a small but significant correlation (`r cr_str`); the relatively weak correlation suggests that there may be a lot of noise in the estimates (e.g., due to children having outlier trials in which they look for much longer or much shorter than adjacent trials).
+
+## Individual differences
+```{r}
+power_mod <- models |> 
+  filter(lt == "log_lt", fxn == "log", cond == "yes", full_re == "yes") |> 
+  pull(model) |> 
+  (\(x) x[[1]])()
+
+power_r2 <- r2(power_mod)
+pwr_r2_m <- power_r2$R2_marginal |> print_num(noz = T)
+pwr_r2_c <- power_r2$R2_conditional |> print_num(noz = T)
+pwr_r2_d <- (power_r2$R2_conditional - power_r2$R2_marginal) |> print_num(noz = T)
+```
+
+We next turned to RQ2, investigating possible variability in habituation patterns across infants.
+We first note that there *are* in fact substantial individual differences across infants: for our selected model, the marginal $R^2$ was `r pwr_r2_m`, while the conditional $R^2$ was `r pwr_r2_c`, suggesting that `r pwr_r2_d` of the variance was explained by the random effects, substantially more than the fixed effects.
+
+We then investigated the possible factors contributing to the observed variability. 
+In particular, we considered the possible effects of age (in months), sex, household size, language group, and region of origin.
+Because each covariate had different missingness across the three MB projects, we constructed a linear model for each possible covariate, along with its interaction with project ID.
+
+```{r}
+mod_indiv_age <- lm(slope ~ project_id * age_mo,
+                    data = df_child)
+mod_indiv_sex <- lm(slope ~ project_id * participant_sex,
+                    data = df_child)
+mod_indiv_hhs <- lm(slope ~ project_id * household_size,
+                    data = df_child |> 
+                      filter(!is.na(household_size)) |> 
+                      mutate(project_id = project_id |> fct_drop() |> `contrasts<-`(value = contr.sum(2))))
+mod_indiv_lgg <- lm(slope ~ project_id * language_group,
+                    data = df_child)
+mod_indiv_ctt <- lm(slope ~ project_id * continent,
+                    data = df_child)
+```
+
+```{r}
+#| label: fig-indiv-age
+#| fig-cap: "LT slopes for all participants by age of participant. Lines and shaded bands indicate best-fitting linear regressions and their 95% confidence bands."
+
+df_child |> 
+  ggplot(aes(x = age_mo, y = slope, col = project_id)) +
+  geom_point(alpha = .2) +
+  geom_smooth(method = "lm") +
+  labs(x = "Age (months)", y = "Participant LT slope", col = "Project")
+```
+
+```{r}
+#| label: fig-indiv-ctt
+#| fig-cap: "LT slopes for all participants by region of origin. Black dots and error bars indicate group means and bootstrapped 95% confidence intervals."
+
+contr_ctt <- emmeans::emmeans(mod_indiv_ctt, ~ continent | project_id) |> 
+  emmeans::contrast()
+
+df_child |> 
+  ggplot(aes(x = continent, y = slope, col = project_id)) +
+  geom_point(alpha = .2, position = position_jitterdodge(jitter.width = .2)) +
+  stat_summary(aes(group = project_id), fun.data = mean_cl_boot, 
+               position = position_dodge(width = .75), col = "black") +
+  labs(x = "Region of origin", y = "Participant LT slope", col = "Project")
+```
+
+Two covariates showed significant effects.
+As shown in @fig-indiv-age, there was a significant effect of age: older children had more negative slopes, and thus habituated faster (`r report_b(mod_indiv_age, "age_mo")`).
+There were also significant interactions between project ID and region of origin, as shown in @fig-indiv-ctt; however, post-hoc contrasts of region by project ID did not reveal any simple effects (all $p$ > `r contr_ctt |> tidy() |> pull(adj.p.value) |> min() |> {\(x) x - .005}() |> print_num(sf = 2, noz = T)`).
+Thus, the only reliable participant-level covariate for LT slope was age.
+
+## Methodological variables
+
+```{r}
+mod_method_seat <- lm(slope ~ project_id * caregiver_seat,
+                      data = df_child)
+mod_method_proc <- lm(slope ~ project_id * method,
+                      data = df_child)
+```
+
+Finally, for RQ3, we investigated possible methodological factors that may influence participant LT slopes.
+We specifically selected where the participant was seated during the experiment and the method of LT elicitation.
+As above, we constructed a linear model for each possible covariate, along with its interaction with project ID.
+Neither model contained a significant methodological covariate.
+
+## Discussion
+Using aggregated data from across MB1, MB3, and MB4, we conducted a set of exploratory analyses on the functional form and factors of habituation in young children.
+(RQ1) We found that the empirical best model had a quadratic functional form, which did not agree with our selected theoretical best model which followed a power law. 
+(RQ2) We also showed that older children habituated more quickly, and (RQ3) neither participant seating nor LT elicitation method affected LT slopes.
+More broadly, we found notable heterogeneity in habituation slopes with substantial unexplained variance.
+Overall, our results point to a general challenge of adopting the MB data to study habituation, since the original projects were not designed to investigate habituation; in particular, the fact that stimuli were sometimes drawn from multiple categories (MB1, MB3) or were engaging enough to exhibit strong ceiling effects (MB4) meant that it was challenging to estimate the true form and factors of habituation. 
+Studies specifically targetting habituation (e.g., MB5) will help to better clarify the nature of habituation, giving us better insight into how LT reflects underlying information processing in young children.
