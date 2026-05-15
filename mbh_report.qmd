@@ -42,14 +42,26 @@ In this brief report, we describe our analyses for the Exploratory ManyBabies Ha
 - RQ3. Do methodological and measurement choices influence the estimation and interpretation of infant habituation?
 
 We use the pooled MB1, MB3, and MB4 data for all analyses.
+@fig-raw-count shows the number of trials for each project for each trial number; we note that all projects showed a general dropoff in the number of data points as trial number increased.
+
+```{r}
+#| label: fig-raw-count
+#| fig-cap: "Number of trials collected for each trial number by project."
+
+d <- read_csv(here("data", "processed_data", "final_merged_manybabies_preprocessed.csv"))
+
+d |>
+  ggplot(aes(x = trial_number, fill = project_id)) +
+  geom_bar(position = position_dodge(preserve = "single")) +
+  labs(x = "Trial number", y = "Count", fill = "Project")
+```
+
 
 ## Functional form of habituation
 
 ```{r}
 #| label: fig-raw-viz
 #| fig-cap: "Log LT by log trial number. Points and error bars indicate all-participant means and bootstrapped 95% confidence intervals. Lines and shaded bands indicate best-fitting linear regressions and their 95% confidence bands."
-
-d <- read_csv(here("data", "processed_data", "final_merged_manybabies_preprocessed.csv"))
 
 d |> 
   ggplot(aes(x = log(trial_num), y = log(looking_time), col = project_id)) +
