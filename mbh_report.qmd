@@ -45,11 +45,27 @@ We use the pooled MB1, MB3, and MB4 data for all analyses.
 
 ## Functional form of habituation
 
+```{r}
+#| label: fig-raw-viz
+#| fig-cap: "Log LT by log trial number. Points and error bars indicate all-participant means and bootstrapped 95% confidence intervals. Lines and shaded bands indicate best-fitting linear regressions and their 95% confidence bands."
+
+d <- read_csv(here("data", "processed_data", "final_merged_manybabies_preprocessed.csv"))
+
+d |> 
+  ggplot(aes(x = log(trial_num), y = log(looking_time), col = project_id)) +
+  # geom_point(alpha = .01, col = "grey40") +
+  # geom_line(aes(group = unique_subject_identifier), alpha = .1, col = "grey") +
+  stat_summary(fun.data = mean_cl_boot) +
+  geom_smooth(method = "lm") +
+  labs(x = "Log trial number", y = "Log LT", col = "Project")
+```
+
 For RQ1, we investigated how LT was related to the trial number.
 The main theoretical functional form of interest was the *power law*, where the relationship between LT and trial number can be expressed as `LT = a * trial_num^b`.
 This formulation derives from the idea of the power law of practice (Snoddy, 1928, *J Appl Psychol*), and has qualitative support from earlier investigations of habituation (Bornstein & Benasich, 1986, *Child Dev*).
 It also approximates the habituation curve derived from a more complex formal model of LT (Raz et al., 2025, *eLife*).
 Under the power law, log LT would show a linear relationship with log trial number.
+@fig-raw-viz shows the relationship between trial number and LT on a log-log plot, illustrating a possible power law fit.
 
 We investigated whether we could recover the power law via model selection. 
 We varied the following parameters:
