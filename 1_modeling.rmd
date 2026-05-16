@@ -15,6 +15,8 @@ library(zoo)
 
 theme_set(theme_bw() + 
             theme(panel.grid = element_blank()))
+
+FIRST_TIME <- TRUE
 ```
 
 ## Load preprocessed data
@@ -42,7 +44,7 @@ d_proc <- d |>
 
 ## Visual check
 
-```{r plot, fig.width=8, fig.height=5}
+```{r plot 1, fig.width=8, fig.height=5}
 d |>
   group_by(project_id, trial_num) |>
   summarise(mean_lt = mean(looking_time), .groups = "drop") |>
@@ -57,7 +59,7 @@ d |>
   theme_minimal()
 ```
 
-```{r plot, fig.width=8, fig.height=5}
+```{r plot 2, fig.width=8, fig.height=5}
 d |>
   group_by(project_id, trial_num) |>
   summarise(mean_log_lt = mean(log_lt), .groups = "drop") |>
@@ -79,7 +81,7 @@ Furthermore, the videos differed across conditions, with the social condition vi
 We explore the goodness of different DV choices (LT_video, LT_frame, LT_video_frame, LT_video_corr, LT_video_frame_corr).
 One option is to fit the power law fit and see which one has the best fit.
 
-```{r eval=F}
+```{r eval=FIRST_TIME}
 mb4_formula_list <- list(
   formula(log(looking_time + .01) ~ log(trial_num) * trial_type + 
             (1 + log(trial_num) | lab_id / subject)),
@@ -195,7 +197,7 @@ formula_list <- list(
 )
 ```
 
-```{r eval=F}
+```{r eval=FIRST_TIME}
 models <- tibble(
   lt = c(rep(c("lt", "log_lt"), times = 2, each = 3), 
          rep(c("lt", "log_lt"), times = 2, each = 2)),
@@ -226,7 +228,7 @@ models |>
 ```
 
 # Expanding window CV
-```{r eval=F}
+```{r eval=FIRST_TIME}
 models_cv <- models |> 
   filter(cond == "yes",
          # fxn == "linear", # for testing
@@ -260,7 +262,7 @@ models_cv_preds <- models_cv |>
 saveRDS(models_cv_preds, here("models", "fit_cv_preds.rds"))
 ```
 
-```{r eval=F}
+```{r eval=FIRST_TIME}
 models_cv_ci <- models_cv_preds |> 
   mutate(rmse = map(preds, \(p) {
     p_sq <- p |> mutate(sqerr = (pred - log_lt) ^ 2)

@@ -2,3 +2,7 @@
 .Rproj.user
 .positai
 .Rhistory
+/models
+/1_modeling_files
+0_preprocessing.html
+1_modeling.html
