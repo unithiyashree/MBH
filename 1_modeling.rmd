@@ -72,37 +72,25 @@ d |>
   theme_minimal()
 ```
 
-## Moving average habituation criterion
-
-```{r}
-d_habituated <- d_proc |> 
-  filter(lt_habituated) |> 
-  slice(1)
-
-d_habituated |> 
-  ggplot(aes(x = trial_num, fill = project_id)) +
-  geom_histogram(binwidth = 1)
-```
-
-Very few kids in MB4 habituated, which is not very surprising (many of them maxed out the looking time).
-
 ## MB4 DV exploration
 MB4 has two DVs: the LT on the video itself, and the LT on the freeze frame at the end of the video. 
 Furthermore, the videos differed across conditions, with the social condition video being 4.4s longer than the nonsocial condition video. 
 
-We explore the goodness of different DV choices (LT_video, LT_frame, LT_video_frame, LT_video_corr, LT_video_frame_corr), as well as LT_video with an additional fixed effect of trial_type.
+We explore the goodness of different DV choices (LT_video, LT_frame, LT_video_frame, LT_video_corr, LT_video_frame_corr).
 One option is to fit the power law fit and see which one has the best fit.
 
 ```{r eval=F}
 mb4_formula_list <- list(
-  formula(log(looking_time + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
-  formula(log(lookingtime_freezeframe + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
-  formula(log(looking_time + lookingtime_freezeframe + .01) ~ log(trial_num) + 
-            (1 + trial_num | lab_id / subject)),
-  formula(log(looking_time_corr + .01) ~ log(trial_num) + (1 + trial_num | lab_id / subject)),
-  formula(log(looking_time_corr + lookingtime_freezeframe + .01) ~ log(trial_num) + 
-            (1 + trial_num | lab_id / subject)),
-  formula(log(looking_time + .01) ~ log(trial_num) * trial_type + (1 + trial_num | lab_id / subject))
+  formula(log(looking_time + .01) ~ log(trial_num) * trial_type + 
+            (1 + log(trial_num) | lab_id / subject)),
+  formula(log(lookingtime_freezeframe + .01) ~ log(trial_num) * trial_type + 
+            (1 + log(trial_num) | lab_id / subject)),
+  formula(log(looking_time + lookingtime_freezeframe + .01) ~ log(trial_num) * trial_type + 
+            (1 + log(trial_num) | lab_id / subject)),
+  formula(log(looking_time_corr + .01) ~ log(trial_num) * trial_type + 
+            (1 + log(trial_num) | lab_id / subject)),
+  formula(log(looking_time_corr + lookingtime_freezeframe + .01) ~ log(trial_num) * trial_type + 
+            (1 + log(trial_num) | lab_id / subject))
 )
 
 mb4_models <- tibble(
@@ -114,11 +102,51 @@ mb4_models <- tibble(
 )
 
 mb4_models |> select(-model)
+
+saveRDS(mb4_models, here("models", "mb4_models.rds"))
 ```
 
 Observations:
-- All models with freezeframe LT did not converge
-- The best fitting model was the model with raw LT and trial type
+- Models with cumulative LT do not converge
+- The best fitting model was the model with LT_frame.
+We switch to LT_frame for all subsequent analyses.
+
+```{r}
+d_proc <- d_proc |> 
+  mutate(
+    lookingtime_video = ifelse(
+      project_id == "MB4",
+      looking_time,
+      NA
+    ),
+    looking_time = ifelse(
+      project_id == "MB4",
+      lookingtime_freezeframe + .001,
+      looking_time
+    ))
+
+d_proc <- d_proc |> 
+  group_by(unique_subject_identifier) |> 
+  mutate(lt_mov_avg = rollmean(looking_time, 3, na.pad = T),
+         lt_baseline = lt_mov_avg[2],
+         lt_habituated = lt_mov_avg < 0.5 * lt_baseline) |> 
+  ungroup()
+
+write_csv(d_proc, here("data", "processed_data", "reprocessed_data.csv"))
+```
+
+## Moving average habituation criterion
+
+```{r}
+d_habituated <- d_proc |> 
+  filter(lt_habituated) |> 
+  group_by(unique_subject_identifier) |> 
+  slice(1)
+
+d_habituated |> 
+  ggplot(aes(x = trial_num, fill = project_id)) +
+  geom_histogram(binwidth = 1)
+```
 
 ## Models
 ```{r}
@@ -304,6 +332,7 @@ models_cv_preds |>
 
 ```{r}
 d_preds <- d_proc |> 
+  filter(!is.na(looking_time)) |> 
   ungroup() |> 
   mutate(pred = predict(models$model[[12]]))
 ```

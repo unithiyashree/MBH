@@ -31,7 +31,12 @@ report_b <- \(mod, bterm, sf = 3) {
   ci.ub <- d_term |> mutate(ci.ub = estimate + qnorm(.975) * std.error) |> 
     pull(ci.ub) |> print_num(sf = sf)
   p <- d_term |> pull(p.value) |> print_num(sf = 3, noz = T)
-  glue("$b$ = {b} [{ci.lb}, {ci.ub}], $p$ = {p}")
+  if (d_term |> pull(p.value) < .0005) {
+    p_str <- "$p$ < .001" 
+  } else {
+    p_str <- glue("$p$ = {p}")
+  }
+  glue("$b$ = {b} [{ci.lb}, {ci.ub}], {p_str}")
 }
 ```
 
@@ -48,7 +53,7 @@ We use the pooled MB1, MB3, and MB4 data for all analyses.
 #| label: fig-raw-count
 #| fig-cap: "Number of trials collected for each trial number by project."
 
-d <- read_csv(here("data", "processed_data", "final_merged_manybabies_preprocessed.csv"))
+d <- read_csv(here("data", "processed_data", "reprocessed_data.csv"))
 
 d |>
   ggplot(aes(x = trial_number, fill = project_id)) +
@@ -56,6 +61,37 @@ d |>
   labs(x = "Trial number", y = "Count", fill = "Project")
 ```
 
+## MB4 dependent variable
+
+```{r}
+#| label: fig-mb4-dv
+#| fig-cap: "BIC values for MB4 LT types tested. Empty circles indicate models that did not converge; their BIC values should not be interpreted."
+
+mb4_models <- readRDS(here("models", "mb4_models.rds"))
+
+mb4_models |> 
+  mutate(lt_type = c("Video", "Freeze frame", "Video + freeze frame", 
+                     "Video corrected", "Video corrected + freeze frame"),
+         converged = map_lgl(model, \(m) {length(m@optinfo$conv$lme4) == 0}),
+         bic_succ = ifelse(converged, BIC, NA),
+         lt_type = factor(lt_type) |> reorder(BIC)) |> 
+  ggplot(aes(x = BIC, y = lt_type, shape = converged)) +
+  geom_point() +
+  scale_shape_manual(values = c(1, 16)) +
+  labs(x = "BIC", y = "LT type", shape = "Converged")
+```
+
+For MB1 and MB3, the stimuli used were dynamic speech stimuli of different types.
+In contrast, for MB4, the stimuli used included a dynamic (audiovisual) video of two types (social or asocial), which concluded with a freeze frame.
+The social video was also ~4.4s longer than the asocial video.
+Thus, there were several possible ways of measuring the LT for MB4: using only the video LT (either raw, or correcting for the 4.4s extra length in the social condition), using only the freeze frame LT, or using the sum of the video and freeze frame LTs (again with either raw or corrected video LTs).
+
+To determine which dependent variable would be most appropriate, we fit the five different LT types using the power law model with matched random slopes (described below), choosing the LT type with the best Bayesian Information Criterion (BIC), which estimates its goodness of fit (via log likelihood) in relation to the number of parameters in the model.
+Smaller BIC values indicate better fitting models, with a ΔBIC $\geq$ 10 considered a notable difference (Rafferty, 1995, *Sociol Methodol*).
+
+@fig-mb4-dv shows the BIC values for all LT types, including whether or not the model was able to converge. 
+Of the models which did converge, the freeze frame LT had the smallest BIC by a substantial margin. 
+Thus, we opted to choose the freeze frame LT as the dependent variable for MB4 for all subsequent analyses.
 
 ## Functional form of habituation
 
@@ -92,9 +128,7 @@ Project ID was coded with sum contrasts.
 Random intercepts and slopes were specified as random effects of participant ID nested within lab ID.
 
 We conducted model selection in two ways.
-First, we calculated the Bayesian Information Criterion (BIC) of the model, which estimates its goodness of fit (via log likelihood) in relation to the number of parameters in the model.
-This approach reflected the extent to which the model was the best fit to all the data.
-Smaller BIC values indicate better fitting models, with a ΔBIC $\geq$ 10 considered a notable difference (Rafferty, 1995, *Sociol Methodol*).
+First, we calculated the BIC of the model, reflecting the extent to which the model was the best fit to all the data.
 Second, we conducted an expanding window cross-validation, where we fit the model to trials 1 through $k$, then predicted the LT for trial $k+1$.
 We then calculated the root mean squared error (RMSE) of the predicted versus observed values.
 This approach focused on the extent to which the model could predict future trials, under the observation that models should not be overfit to a specific number of trials, which is typically a methodological constraint.
@@ -172,13 +206,13 @@ models_cv_preds |>
 We next turned to the expanding window cross-validation.
 For computational reasons, we selected only models with log LT as the outcome and including the trial type interaction, since these features uniformly improved model fit.
 @fig-fxn-rmse shows the prediction RMSE for tested models by the last trial observed in the training data.
-RMSE increased over trials, possibly due to a combination of increasing noisiness of the data, as well as increasing dropoff (noting, for example, that MB3 and MB4 both had fewer than 16 trials).
-The 95% confidence intervals were overlapping for all models at all trial numbers, suggesting that they were not different in their predictive accuracy.
+The 95% confidence intervals were mostly overlapping across models at all trial numbers, suggesting that they were not different in their predictive accuracy; however, the log models were often the numerically best model (i.e., lowest RMSE). 
 
 Thus, we were unable to recover the power law model via model selection using either BIC or prediction RMSE.
 This outcome was unexpected and may have several explanations.
 First, none of MB1, MB3, or MB4 were designed to study habituation, and thus their stimuli were also not tuned to primarily elicit a habituation effect.
-Notably, all stimuli were dynamic, and could possibly come from different categories (in MB1 and MB3), or were played exactly once each trial with a maximum LT matching the duration of the video (in MB4).
+Notably, for MB1 and MB3, all stimuli were dynamic, and could possibly come from different categories.
+For MB4, the freeze frame occurred after a dynamic video, which may have modulated infants' looking behaviour.
 These features may have introduced unwanted noise in the data, resulting in non-standard habituation curves.
 Second, we note that the resultant predictions between the quadratic and log forms were very similar; it is possible that the random slopes provided sufficient flexibility such that good fits were obtainable using either functional form, rendering them indistinguishable.
 
@@ -211,7 +245,7 @@ df_child |>
 To understand the validity of our selected model, we conducted two sanity checks to determine if our selected model returned reasonable estimates.
 First, we looked at the effect of age on per-participant *intercepts*; we expected younger children to have higher random intercepts---their slower information processing means that they are likely to have overall higher LT across all stimuli and trials.
 @fig-sanity-intercept shows the effect of age on LT intercept. 
-A linear model predicting intercept from age in months did not find a significant effect of age, although it was numerically in the expected direction (`r report_b(mod_int, "age_mo")`).
+A linear model predicting intercept from age in months found a significant negative effect of age (`r report_b(mod_int, "age_mo")`).
 
 ```{r}
 #| label: fig-sanity-habit
@@ -222,7 +256,12 @@ cor_habit <- with(df_child, cor.test(slope, hab_trial, use = "pairwise.complete.
 cr <- cor_habit$estimate |> print_num(noz = T)
 cr_ci <- cor_habit$conf.int |> print_num(noz = T)
 cr_p <- cor_habit$p.value |> print_num(noz = T)
-cr_str <- glue("$r$ = {cr} [{cr_ci[1]}, {cr_ci[2]}], $p$ < .001")
+if (cor_habit$p.value < .0005) {
+  cr_p_str <- "$p$ < .001"
+} else {
+  cr_p_str <- glue("$p$ = {cr_p}")
+}
+cr_str <- glue("$r$ = {cr} [{cr_ci[1]}, {cr_ci[2]}], {cr_p_str}")
 
 df_child |> 
   ggplot(aes(x = hab_trial, y = slope, col = project_id)) +
@@ -285,7 +324,7 @@ df_child |>
   labs(x = "Age (months)", y = "Participant LT slope", col = "Project")
 ```
 
-```{r}
+```{r eval=F}
 #| label: fig-indiv-ctt
 #| fig-cap: "LT slopes for all participants by region of origin. Black dots and error bars indicate group means and bootstrapped 95% confidence intervals."
 
@@ -300,10 +339,9 @@ df_child |>
   labs(x = "Region of origin", y = "Participant LT slope", col = "Project")
 ```
 
-Two covariates showed significant effects.
-As shown in @fig-indiv-age, there was a significant effect of age: older children had more negative slopes, and thus habituated faster (`r report_b(mod_indiv_age, "age_mo")`).
-There were also significant interactions between project ID and region of origin, as shown in @fig-indiv-ctt; however, post-hoc contrasts of region by project ID did not reveal any simple effects (all $p$ > `r contr_ctt |> tidy() |> pull(adj.p.value) |> min() |> {\(x) x - .005}() |> print_num(sf = 2, noz = T)`).
-Thus, the only reliable participant-level covariate for LT slope was age.
+The only covariate that showed a significant effect was age.
+As shown in @fig-indiv-age, older children had more negative slopes, and thus habituated faster (`r report_b(mod_indiv_age, "age_mo")`).
+There were no significant effects of participant sex (`r report_b(mod_indiv_sex, "participant_sexM")`), household size (`r report_b(mod_indiv_hhs, "household_size")`), language group (all $p$ > .54), or region of origin (all $p$ > .06).
 
 ## Methodological variables
 
@@ -317,12 +355,12 @@ mod_method_proc <- lm(slope ~ project_id * method,
 Finally, for RQ3, we investigated possible methodological factors that may influence participant LT slopes.
 We specifically selected where the participant was seated during the experiment and the method of LT elicitation.
 As above, we constructed a linear model for each possible covariate, along with its interaction with project ID.
-Neither model contained a significant methodological covariate.
+Neither model contained a significant methodological covariate: there were no significant effects of participant seat (all $p$ > .38) or elicitation procedure (all $p$ > .32).
 
 ## Discussion
 Using aggregated data from across MB1, MB3, and MB4, we conducted a set of exploratory analyses on the functional form and factors of habituation in young children.
 (RQ1) We found that the empirical best model had a quadratic functional form, which did not agree with our selected theoretical best model which followed a power law. 
 (RQ2) We also showed that older children habituated more quickly, and (RQ3) neither participant seating nor LT elicitation method affected LT slopes.
 More broadly, we found notable heterogeneity in habituation slopes with substantial unexplained variance.
-Overall, our results point to a general challenge of adopting the MB data to study habituation, since the original projects were not designed to investigate habituation; in particular, the fact that stimuli were sometimes drawn from multiple categories (MB1, MB3) or were engaging enough to exhibit strong ceiling effects (MB4) meant that it was challenging to estimate the true form and factors of habituation. 
+Overall, our results point to a general challenge of adopting the MB data to study habituation, since the original projects were not designed to investigate habituation; in particular, the fact that stimuli were sometimes drawn from multiple categories (MB1, MB3) or were a combination of a dynamic video and a static freeze frame (MB4) meant that it was challenging to estimate the true form and factors of habituation. 
 Studies specifically targetting habituation (e.g., MB5) will help to better clarify the nature of habituation, giving us better insight into how LT reflects underlying information processing in young children.
