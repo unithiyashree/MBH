@@ -249,7 +249,7 @@ A linear model predicting intercept from age in months found a significant negat
 
 ```{r}
 #| label: fig-sanity-habit
-#| fig-cap: "LT slopes for all participants by trial at which habituation criterion is reached. Lines indicate best-fitting linear regressions; confidence bands were excluded due to visual clutter."
+#| fig-cap: "LT slopes for all participants by trial at which habituation criterion is reached. Lines and shaded bands indicate best-fitting linear regressions and their 95% confidence bands."
 
 cor_habit <- with(df_child, cor.test(slope, hab_trial, use = "pairwise.complete.obs"))
 
@@ -266,7 +266,7 @@ cr_str <- glue("$r$ = {cr} [{cr_ci[1]}, {cr_ci[2]}], {cr_p_str}")
 df_child |> 
   ggplot(aes(x = hab_trial, y = slope, col = project_id)) +
   geom_point(alpha = .2, position = position_jitter(width = .4)) +
-  geom_smooth(method = "lm", se = F) +
+  geom_smooth(method = "lm") +
   labs(x = "Trial when moving average habituation criterion reached",
        y = "Participant LT slope",
        col = "Project")
@@ -275,7 +275,7 @@ df_child |>
 Second, we considered the relationship between per-participant *slopes* and a common quantised habituation criterion.
 Specifically, we use the criterion of $\geq$ 50% decrease in average LT from the baseline (first 3 trials), using a rolling window of 3 trials (see Cohen, 2004, *Infant Child Dev*; Oakes, 2010, *J Cogn Dev*).
 If the per-participant slopes from our model capture meaningful individual differences in habituation, they should be correlated with the trial at which the habituation criterion is reached.
-@fig-sanity-habit shows the relationship between per-participant slopes and the trial at which habituation criterion is reached; we note that very few infants in MB4 actually reached habituation criterion (because many of them retained very high LTs even in later trials), so the clearest signal comes from MB1 and MB3.
+@fig-sanity-habit shows the relationship between per-participant slopes and the trial at which habituation criterion is reached.
 Overall, there was a small but significant correlation (`r cr_str`); the relatively weak correlation suggests that there may be a lot of noise in the estimates (e.g., due to children having outlier trials in which they look for much longer or much shorter than adjacent trials).
 
 ## Individual differences
